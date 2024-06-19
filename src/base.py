@@ -894,7 +894,7 @@ class LBMBase(object):
             f, fstar = self.step(f, timestep, return_fpost=False)
             pbar.set_description(f"Saving data at timestep {timestep}/{timestep_end}")
             rho, u = self.update_macroscopic(f)
-            self.handle_io_timestep(timestep, f, fstar, rho, u)
+            self.handle_io_timestep(timestep, f, rho, u)
         return self.saved_data
 
     def run_batch_generator(self, timestep_end, timestep_start=0, output_offset=0, output_stride=1, generator_size=100, init_f=None):
@@ -931,7 +931,7 @@ class LBMBase(object):
             if io_flag:
                 pbar.set_description(f"Saving data at timestep {timestep}/{timestep_end}")
                 rho, u = self.update_macroscopic(f)
-                self.handle_io_timestep(timestep, f, fstar, rho, u)
+                self.handle_io_timestep(timestep, f, rho, u)
             if len(self.saved_data)>=generator_size:
                 yield self.saved_data
                 self.init_saved_data()
@@ -997,12 +997,6 @@ class LBMBase(object):
         u: jax.numpy.ndarray
             The velocity field at the current time step.
         """
-        kwargs = {
-            "timestep": timestep,
-            "rho": rho,
-            "u": u,
-            "f_poststreaming": f
-        }
         self.saved_data['timestep'].append(timestep)
         self.saved_data['f_poststreaming'].append(f)
         self.saved_data['u'].append(u)
