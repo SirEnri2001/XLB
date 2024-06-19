@@ -4,8 +4,6 @@ from src.models import BGKSim, KBCSim
 from src.utils import *
 from src.boundary_conditions import *
 import numpy as np
-_diam=20
-_prescribed_vel=0.006
 class Cylinder(BGKSim):
     def __init__(self, **kwargs):
         self.diam=kwargs['diam']
@@ -16,10 +14,10 @@ class Cylinder(BGKSim):
         # Define the cylinder surface
         coord = np.array([(i, j) for i in range(self.nx) for j in range(self.ny)])
         xx, yy = coord[:, 0], coord[:, 1]
-        cx, cy = 2.*_diam, 2.*_diam
-        cylinder = (xx - cx)**2 + (yy-cy)**2 <= (_diam/2.)**2
+        cx, cy = 2.*self.diam, 2.*self.diam
+        cylinder = (xx - cx)**2 + (yy-cy)**2 <= (self.diam/2.)**2
         cylinder = coord[cylinder]
-        implicit_distance = np.reshape((xx - cx)**2 + (yy-cy)**2 - (_diam/2.)**2, (self.nx, self.ny))
+        implicit_distance = np.reshape((xx - cx)**2 + (yy-cy)**2 - (self.diam/2.)**2, (self.nx, self.ny))
         self.BCs.append(InterpolatedBounceBackBouzidi(tuple(cylinder.T), implicit_distance, self.gridInfo, self.precisionPolicy))
 
         # Outflow BC
@@ -82,10 +80,10 @@ class CylinderForce(BGKSimForce):
         # Define the cylinder surface
         coord = np.array([(i, j) for i in range(self.nx) for j in range(self.ny)])
         xx, yy = coord[:, 0], coord[:, 1]
-        cx, cy = 2. * _diam, 2. * _diam
-        cylinder = (xx - cx) ** 2 + (yy - cy) ** 2 <= (_diam / 2.) ** 2
+        cx, cy = 2. * self.diam, 2. * self.diam
+        cylinder = (xx - cx) ** 2 + (yy - cy) ** 2 <= (self.diam / 2.) ** 2
         cylinder = coord[cylinder]
-        implicit_distance = np.reshape((xx - cx) ** 2 + (yy - cy) ** 2 - (_diam / 2.) ** 2, (self.nx, self.ny))
+        implicit_distance = np.reshape((xx - cx) ** 2 + (yy - cy) ** 2 - (self.diam / 2.) ** 2, (self.nx, self.ny))
         self.BCs.append(
             InterpolatedBounceBackBouzidi(tuple(cylinder.T), implicit_distance, self.gridInfo, self.precisionPolicy))
 
