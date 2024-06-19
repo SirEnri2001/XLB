@@ -41,6 +41,15 @@ class LBMBase(object):
         nz (int, optional): Number of grid points in the z-direction. Defaults to 0.
         precision (str, optional): A string specifying the precision used for the simulation. Defaults to "f32/f32".
     """
+
+    def init_saved_data(self):
+        self.saved_data = {
+            'f_poststreaming':[],
+            'f_postcollision':[],
+            'rho':[],
+            'u':[],
+            'timestep':[]
+        }
     
     def __init__(self, **kwargs):
         self.omega = kwargs.get("omega")
@@ -878,15 +887,15 @@ class LBMBase(object):
             return f_poststreaming, None
 
     def run_step(self, timestep_end, timestep_start=0, init_f=None):
-        self.saved_data = []
+        self.init_saved_data()
         f = self.distributed_array(init_f)
         pbar = tqdm(range(timestep_start, timestep_end + 1))
         for timestep in pbar:
-            f, fstar = self.step(f, timestep, return_fpost=self.returnFpost)
+            f, fstar = self.step(f, timestep, return_fpost=False)
             pbar.set_description(f"Saving data at timestep {timestep}/{timestep_end}")
             rho, u = self.update_macroscopic(f)
-            self.handle_io_timestep(timestep, f, fstar, rho, u, None, None)
-        return f
+            self.handle_io_timestep(timestep, f, fstar, rho, u)
+        return self.saved_data
 
     def run_batch_generator(self, timestep_end, timestep_start=0, output_offset=0, output_stride=1, generator_size=100, init_f=None):
         """
@@ -910,26 +919,25 @@ class LBMBase(object):
         f: jax.numpy.ndarray
             The distribution functions after the simulation.
         """
-        self.saved_data=[]
-        if init_f is None and not timestep_start == 0:
-            raise ValueError("Should specify f for timestep > 0.")
-        if timestep_start == 0:
+        self.init_saved_data()
+        if init_f is None:
             f = self.assign_fields_sharded()
         else:
             f = self.distributed_array(init_f)
         pbar = tqdm(range(timestep_start, timestep_end + 1))
         for timestep in pbar:
             io_flag = output_stride > 0 and timestep >= output_offset and timestep % output_stride == 0
-            f, fstar = self.step(f, timestep, return_fpost=self.returnFpost)
+            f, fstar = self.step(f, timestep, return_fpost=False)
             if io_flag:
                 pbar.set_description(f"Saving data at timestep {timestep}/{timestep_end}")
                 rho, u = self.update_macroscopic(f)
-                self.handle_io_timestep(timestep, f, fstar, rho, u, None, None)
+                self.handle_io_timestep(timestep, f, fstar, rho, u)
             if len(self.saved_data)>=generator_size:
                 yield self.saved_data
-                self.saved_data = []
+                self.init_saved_data()
         if len(self.saved_data)>0:
             yield self.saved_data
+            self.init_saved_data()
         return f
 
     def run(self, timestep_end, timestep_start=0, output_offset=0, output_stride=1, init_f=None):
@@ -954,24 +962,22 @@ class LBMBase(object):
         f: jax.numpy.ndarray
             The distribution functions after the simulation.
         """
-        self.saved_data=[]
-        if init_f is None and not timestep_start == 0:
-            raise ValueError("Should specify f for timestep > 0.")
-        if timestep_start == 0:
+        self.init_saved_data()
+        if init_f is None:
             f = self.assign_fields_sharded()
         else:
             f = self.distributed_array(init_f)
         pbar = tqdm(range(timestep_start, timestep_end + 1))
         for timestep in pbar:
             io_flag = output_stride > 0 and timestep >= output_offset and timestep % output_stride == 0
-            f, fstar = self.step(f, timestep, return_fpost=self.returnFpost)
+            f, fstar = self.step(f, timestep, return_fpost=False)
             if io_flag:
                 pbar.set_description(f"Saving data at timestep {timestep}/{timestep_end}")
                 rho, u = self.update_macroscopic(f)
-                self.handle_io_timestep(timestep, f, fstar, rho, u, None, None)
-        return f
+                self.handle_io_timestep(timestep, f, rho, u)
+        return self.saved_data
 
-    def handle_io_timestep(self, timestep, f, fstar, rho, u, rho_prev, u_prev):
+    def handle_io_timestep(self, timestep, f, rho, u):
         """
         This function handles the input/output (I/O) operations at each time step of the simulation.
 
@@ -994,15 +1000,13 @@ class LBMBase(object):
         kwargs = {
             "timestep": timestep,
             "rho": rho,
-            "rho_prev": rho_prev,
             "u": u,
-            "u_prev": u_prev,
-            "f_poststreaming": f,
-            "f_postcollision": fstar
+            "f_poststreaming": f
         }
-        o_data = self.output_data(**kwargs)
-        if o_data is not None:
-            self.saved_data.append(o_data)
+        self.saved_data['timestep'].append(timestep)
+        self.saved_data['f_poststreaming'].append(f)
+        self.saved_data['u'].append(u)
+        self.saved_data['rho'].append(rho)
 
     def output_data(self, **kwargs):
         """
