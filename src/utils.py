@@ -15,7 +15,7 @@ import __main__
 
 
 @partial(jit, static_argnums=(1, 2, 3))
-def resample_field(field, factor, method='bicubic', shape=None):
+def resample_field(field, factor=-1, method='bicubic', shape=None):
     """
     Resample a JAX array by a factor of `factor` along each axis.
 
