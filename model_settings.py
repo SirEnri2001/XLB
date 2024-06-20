@@ -57,7 +57,7 @@ class BGKSimForce(LBMExternalForce):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    @partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,), donate_argnums=(1,2,3,4))
     def collision(self, f, feq, rho, u):
         """
         BGK collision step for lattice.

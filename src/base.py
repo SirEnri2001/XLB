@@ -324,8 +324,7 @@ class LBMBase(object):
         attributes_to_show = [
             'omega', 'nx', 'ny', 'nz', 'dim', 'precision', 'lattice', 
             'checkpointRate', 'checkpointDir', 'downsamplingFactor', 
-            'printInfoRate', 'ioRate', 'computeMLUPS', 
-            'restore_checkpoint', 'backend', 'nDevices'
+            'backend', 'nDevices'
         ]
 
         descriptive_names = {
@@ -339,10 +338,6 @@ class LBMBase(object):
             'checkpointRate': 'Checkpoint Rate',
             'checkpointDir': 'Checkpoint Directory',
             'downsamplingFactor': 'Downsampling Factor',
-            'printInfoRate': 'Print Info Rate',
-            'ioRate': 'I/O Rate',
-            'computeMLUPS': 'Compute MLUPS',
-            'restore_checkpoint': 'Restore Checkpoint',
             'backend': 'Backend',
             'nDevices': 'Number of Devices'
         }
@@ -806,7 +801,7 @@ class LBMBase(object):
 
         return rho, u
     
-    @partial(jit, static_argnums=(0, 4))
+    @partial(jit, static_argnums=(0, 4), donate_argnums=(2))
     def apply_bc(self, fout, fin, timestep, implementation_step):
         """
         This function applies the boundary conditions to the distribution functions.
@@ -838,7 +833,7 @@ class LBMBase(object):
                     fout = fout.at[bc.indices].set(bc.apply(fout, fin))
                     
         return fout
-    @partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,), donate_argnums=(1))
     def prepare_step(self, f_poststreaming):
         f = self.precisionPolicy.cast_to_compute(f_poststreaming)
         rho, u = self.update_macroscopic(f)
@@ -875,7 +870,7 @@ class LBMBase(object):
             The post-collision distribution functions after the simulation step, or None if 
             return_fpost is False.
         """
-        f, feq, rho, u = self.prepare_step(f_poststreaming)
+        f_poststreaming, feq, rho, u = self.prepare_step(f_poststreaming)
         f_postcollision = self.collision(f_poststreaming, feq, rho, u)
         f_postcollision = self.apply_bc(f_postcollision, f_poststreaming, timestep, "PostCollision")
         f_poststreaming = self.streaming(f_postcollision)
@@ -1029,7 +1024,7 @@ class LBMBase(object):
         """
         pass
 
-    @partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,), donate_argnums=())
     def collision(self, fin, feq, rho, u):
         """
         This function performs the collision step in the Lattice Boltzmann Method.
