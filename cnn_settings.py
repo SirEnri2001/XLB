@@ -83,7 +83,6 @@ class SimpleNet(nn.Module):
         x = nn.leaky_relu(x)
         x = nn.Conv(self.features, kernel_size=self.kernel_size, strides=self.strides, padding='SAME')(x)
         x = nn.leaky_relu(x)
-        x = nn.Dense(self.features)(x)
         x = nn.Conv(2, kernel_size=self.kernel_size, strides=self.strides, padding='SAME')(x)
         return x
 from clu import metrics
@@ -100,23 +99,31 @@ class TrainState(train_state.TrainState):
 
 def create_train_state(module, rng, learning_rate, momentum):
   """Creates an initial `TrainState`."""
-  params = module.init(rng, jnp.ones([1, 440, 82, 2]))['params'] # initialize parameters by passing a template image
+  params = module.init(rng, jnp.ones([1, 110, 20, 2]))['params'] # initialize parameters by passing a template image
   tx = optax.sgd(learning_rate, momentum)
   return TrainState.create(
       apply_fn=module.apply, params=params, tx=tx,
       metrics=Metrics.empty())
 
+@partial(jax.jit)
+def normalize_frame(frame):
+    min = frame.min()
+    max = frame.max()
+    return (frame - min) / (max - min)
+
 @partial(jax.jit, static_argnums=(2, 3))
-def train_step(state, ref_data, low_res_lbm_solver, frame_idx = 0):
+def train_step(state, batch_data, low_res_lbm_solver, frame_idx = 0):
   """Train for a single step."""
-  def loss_fn(params, batch_data, selected_ts):
-    _ , high_res_u = low_res_lbm_solver.update_macroscopic(batch_data['f_poststreaming'][selected_ts + 1])
-    low_res_step_output = low_res_lbm_solver.run_step(selected_ts+1, selected_ts, batch_data['f_poststreaming'][selected_ts])
-    correction = state.apply_fn({'params': params}, low_res_lbm_solver.saved_data['u'][0])
-    loss = optax.l2_loss(low_res_step_output['u'][0]+correction, high_res_u).sum()
-    return loss
+  def loss_fn(params, f):
+      _, high_res_u = low_res_lbm_solver.update_macroscopic(f)
+      high_res_u = normalize_frame(high_res_u)
+      input_f = normalize_frame(f)
+      low_res_step_output = low_res_lbm_solver.run_step(0, input_f)
+      correction = state.apply_fn({'params': params}, low_res_lbm_solver.saved_data['u'][0])
+      loss = optax.l2_loss(normalize_frame(low_res_step_output['u'][0]) + correction, high_res_u).sum()
+      return loss
   grad_fn = jax.grad(loss_fn)
-  grads = grad_fn(state.params, ref_data, frame_idx)
+  grads = grad_fn(state.params, batch_data['f_poststreaming'][frame_idx + 1])
   state = state.apply_gradients(grads=grads)
   return state
 
