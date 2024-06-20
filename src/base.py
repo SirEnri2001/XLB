@@ -71,6 +71,8 @@ class LBMBase(object):
         self.returnFpost = kwargs.get("return_fpost", False)
         self.computeMLUPS = kwargs.get("compute_MLUPS", False)
         self.restore_checkpoint = kwargs.get("restore_checkpoint", False)
+        self.transfer_output=kwargs.get("transfer_output", True)
+        self.quiet=kwargs.get("quiet", False)
         self.nDevices = jax.device_count()
         self.backend = jax.default_backend()
 
@@ -109,8 +111,8 @@ class LBMBase(object):
             print("WARNING: nx increased from {} to {} in order to accommodate domain sharding per XLA device.".format(nx, self.nx))
         self.ny = ny
         self.nz = nz
-
-        self.show_simulation_parameters()
+        if not self.quiet:
+            self.show_simulation_parameters()
     
         # Store grid information
         self.gridInfo = {
@@ -884,15 +886,16 @@ class LBMBase(object):
     def run_step(self, timestep_end, timestep_start=0, init_f=None):
         self.init_saved_data()
         f = self.distributed_array(init_f)
-        pbar = tqdm(range(timestep_start, timestep_end + 1))
+        pbar = tqdm(range(timestep_start, timestep_end + 1)) if not self.quiet else range(timestep_start, timestep_end + 1)
         for timestep in pbar:
             f, fstar = self.step(f, timestep, return_fpost=False)
-            pbar.set_description(f"Saving data at timestep {timestep}/{timestep_end}")
+            if not self.quiet:
+                pbar.set_description(f"Saving data at timestep {timestep}/{timestep_end}")
             rho, u = self.update_macroscopic(f)
             self.handle_io_timestep(timestep, f, rho, u)
         return self.saved_data
 
-    def run_batch_generator(self, timestep_end, timestep_start=0, output_offset=0, output_stride=1, generator_size=100, init_f=None):
+    def run_batch_generator(self, timestep_end, timestep_start=0, output_offset=0, output_stride=1, generator_size=10, init_f=None):
         """
         This function runs the LBM simulation for a specified number of time steps.
 
@@ -920,20 +923,19 @@ class LBMBase(object):
         else:
             f = self.distributed_array(init_f)
         pbar = tqdm(range(timestep_start, timestep_end + 1))
+        yield pbar
         for timestep in pbar:
             io_flag = output_stride > 0 and timestep >= output_offset and timestep % output_stride == 0
             f, fstar = self.step(f, timestep, return_fpost=False)
             if io_flag:
-                pbar.set_description(f"Saving data at timestep {timestep}/{timestep_end}")
                 rho, u = self.update_macroscopic(f)
                 self.handle_io_timestep(timestep, f, rho, u)
-            if len(self.saved_data)>=generator_size:
+            if len(self.saved_data['timestep'])>=generator_size:
                 yield self.saved_data
                 self.init_saved_data()
         if len(self.saved_data)>0:
             yield self.saved_data
             self.init_saved_data()
-        return f
 
     def run(self, timestep_end, timestep_start=0, output_offset=0, output_stride=1, init_f=None):
         """
@@ -962,12 +964,13 @@ class LBMBase(object):
             f = self.assign_fields_sharded()
         else:
             f = self.distributed_array(init_f)
-        pbar = tqdm(range(timestep_start, timestep_end + 1))
+        pbar = tqdm(range(timestep_start, timestep_end + 1)) if not self.quiet else range(timestep_start, timestep_end + 1)
         for timestep in pbar:
             io_flag = output_stride > 0 and timestep >= output_offset and timestep % output_stride == 0
             f, fstar = self.step(f, timestep, return_fpost=False)
             if io_flag:
-                pbar.set_description(f"Saving data at timestep {timestep}/{timestep_end}")
+                if not self.quiet:
+                    pbar.set_description(f"Saving data at timestep {timestep}/{timestep_end}")
                 rho, u = self.update_macroscopic(f)
                 self.handle_io_timestep(timestep, f, rho, u)
         return self.saved_data
@@ -992,10 +995,16 @@ class LBMBase(object):
         u: jax.numpy.ndarray
             The velocity field at the current time step.
         """
-        self.saved_data['timestep'].append(timestep)
-        self.saved_data['f_poststreaming'].append(f)
-        self.saved_data['u'].append(u)
-        self.saved_data['rho'].append(rho)
+        if self.transfer_output:
+            self.saved_data['timestep'].append(timestep)
+            self.saved_data['f_poststreaming'].append(process_allgather(f))
+            self.saved_data['u'].append(process_allgather(u))
+            self.saved_data['rho'].append(process_allgather(rho))
+        else:
+            self.saved_data['timestep'].append(timestep)
+            self.saved_data['f_poststreaming'].append(f)
+            self.saved_data['u'].append(u)
+            self.saved_data['rho'].append(rho)
 
     def output_data(self, **kwargs):
         """
