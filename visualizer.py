@@ -5,7 +5,7 @@ import jaxlib.xla_extension
 
 def visualize_data(data, field_name='u', ts_start=0, ts_stride=1, ts_end=-1, img_num=20):
     if ts_end == -1:
-        ts_end = len(data['timestep'])
+        ts_end = data['timestep'][-1]
     ts_range = data['timestep'][-1] - data['timestep'][0] + 1
     uniformed_ts_start = (ts_start - data['timestep'][0])/ts_range
     uniformed_ts_end = (ts_end - data['timestep'][0])/ts_range
