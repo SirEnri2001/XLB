@@ -45,3 +45,10 @@ def inspect_data(data):
             print("int")
         else:
             print(type(data[i][0]))
+
+def visualize_diff(frames_1, frames_2, field_name='u'):
+    import optax
+    import matplotlib.pyplot as plt
+    y = optax.l2_loss(frames_1[field_name], frames_2[field_name]).sum(axis=(1, 2, 3))
+    x = np.array(range(y.shape[0]))
+    plt.plot(x, y)
