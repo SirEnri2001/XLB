@@ -883,16 +883,12 @@ class LBMBase(object):
         else:
             return f_poststreaming, None
 
-    def run_step(self, timestep_end, timestep_start=0, init_f=None):
+    def run_step(self, timestep, init_f=None):
         self.init_saved_data()
         f = self.distributed_array(init_f)
-        pbar = tqdm(range(timestep_start, timestep_end + 1)) if not self.quiet else range(timestep_start, timestep_end + 1)
-        for timestep in pbar:
-            f, fstar = self.step(f, timestep, return_fpost=False)
-            if not self.quiet:
-                pbar.set_description(f"Saving data at timestep {timestep}/{timestep_end}")
-            rho, u = self.update_macroscopic(f)
-            self.handle_io_timestep(timestep, f, rho, u)
+        f, fstar = self.step(f, timestep, return_fpost=False)
+        rho, u = self.update_macroscopic(f)
+        self.handle_io_timestep(timestep, f, rho, u)
         return self.saved_data
 
     def run_batch_generator(self, timestep_end, timestep_start=0, output_offset=0, output_stride=1, generator_size=10, init_f=None):
