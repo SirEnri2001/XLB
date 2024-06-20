@@ -107,7 +107,11 @@ class CylinderForce(BGKSimForce):
         wall = np.concatenate([self.boundingBoxIndices['top'], self.boundingBoxIndices['bottom']])
         vel_wall = np.zeros(wall.shape, dtype=self.precisionPolicy.compute_dtype)
         self.BCs.append(Regularized(tuple(wall.T), self.gridInfo, self.precisionPolicy, 'velocity', vel_wall))
+        self.state = None
 
     @partial(jit, static_argnums=(0,))
     def get_force(self, f_postcollision, feq, rho, u):
-        return state.apply_fn({'params': state.params}, u)
+        return self.state.apply_fn({'params': self.state.params}, u)
+
+    def set_state(self, state):
+        self.state = state
