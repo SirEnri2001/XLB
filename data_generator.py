@@ -86,12 +86,22 @@ def read_data(total_batch):
     return res_data
 
 def read_data_and_downsample(total_batch, factor=4):
+    def batch_read_file(file_name):
+        loaded_data = np.load(file_name)
+        resized_shape = (
+        loaded_data['u'].shape[0], round(loaded_data['u'].shape[1] / factor), round(loaded_data['u'].shape[2] / factor))
+        return loaded_data['timestep'], resample_field(loaded_data['u'], factor, shape=(
+        resized_shape[0], resized_shape[1], resized_shape[2], loaded_data['u'].shape[3])), resample_field(loaded_data['f_poststreaming'], factor, shape=(
+        resized_shape[0], resized_shape[1], resized_shape[2], loaded_data['f_poststreaming'].shape[3]))
+
     def batch_read(total_batch):
+        # for i in tqdm(range(total_batch)):
+        #     yield np.load('./data/batched_ref_data_{}.npz'.format(i))
         from concurrent.futures import ThreadPoolExecutor
         tasks = []
         with ThreadPoolExecutor(max_workers=24) as executor:
             for i in range(total_batch):
-                tasks.append(executor.submit(np.load, './data/batched_ref_data_{}.npz'.format(i)))
+                tasks.append(executor.submit(batch_read_file, './data/batched_ref_data_{}.npz'.format(i)))
             for task in tqdm(tasks):
                 yield task.result()
     res_data = {
@@ -99,11 +109,10 @@ def read_data_and_downsample(total_batch, factor=4):
         'u':[],
         'f_poststreaming':[]
     }
-    for loaded_data in batch_read(total_batch):
-        resized_shape = (loaded_data['u'].shape[0], round(loaded_data['u'].shape[1]/factor), round(loaded_data['u'].shape[2]/factor))
-        res_data['timestep'].append(loaded_data['timestep'])
-        res_data['u'].append(resample_field(loaded_data['u'], factor, shape=(resized_shape[0], resized_shape[1], resized_shape[2], loaded_data['u'].shape[3])))
-        res_data['f_poststreaming'].append(resample_field(loaded_data['f_poststreaming'], factor, shape=(resized_shape[0], resized_shape[1], resized_shape[2], loaded_data['f_poststreaming'].shape[3])))
+    for ts, u, f in batch_read(total_batch):
+        res_data['timestep'].append(ts)
+        res_data['u'].append(u)
+        res_data['f_poststreaming'].append(f)
     print("concatenating ... ")
     res_data['timestep'] = np.concatenate(res_data['timestep'], axis=0)
     res_data['u'] = np.concatenate(res_data['u'], axis=0)
