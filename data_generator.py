@@ -39,12 +39,7 @@ def generate_sim_dataset(diam, ts_start, ts_end, output_offset=0, output_stride=
         print(colored("WARNING: timestep_end is too small, Karman flow may not appear. Recommend value is {}".format(
             int(100 // tc)), "red"))
     sim = instantiate_simulator(diam)
-    if init_f is not None:
-        loaded_data = np.load('./data/init_frame.npz')
-        init_f = resample_field(loaded_data['f'], shape=(nx, ny, loaded_data['f'].shape[2]))
-        generated_data = sim.run(ts_end, ts_start, output_offset, output_stride, init_f=init_f)
-    else:
-        generated_data = sim.run(ts_end, ts_start, output_offset, output_stride)
+    generated_data = sim.run(ts_end, ts_start, output_offset, output_stride, init_f=init_f)
     print("sim completed, data postprocessing ...")
     generated_data['timestep'] = np.array(generated_data['timestep'])
     generated_data['f_poststreaming'] = np.stack(generated_data['f_poststreaming'], axis=0)
@@ -61,33 +56,27 @@ def batch_generator_generate_sim_dataset(diam, ts_start, ts_end, output_offset=0
         print(colored("WARNING: timestep_end is too small, Karman flow may not appear. Recommend value is {}".format(
             int(100 // tc)), "red"))
     sim = instantiate_simulator(diam)
-    if init_f is not None:
-        loaded_data = np.load('./data/init_frame.npz')
-        init_f = resample_field(loaded_data['f'], shape=(nx, ny, loaded_data['f'].shape[2]))
-        return sim.run_batch_generator(ts_end, ts_start, output_offset, output_stride, init_f=init_f)
-    else:
-        return sim.run_batch_generator(ts_end, ts_start, output_offset, output_stride)
+    return sim.run_batch_generator(ts_end, ts_start, output_offset, output_stride, init_f=init_f)
 
-def read_data(total_batch):
+def read_data(total_batch, file_name="batched_ref_data"):
     res_data = {
         'timestep':[],
-        'rho':[],
+        'f_poststreaming':[],
         'u':[]
     }
     for i in tqdm(range(total_batch)):
-        loaded_data = np.load('./data/batched_ref_data_{}.npz'.format(i))
+        loaded_data = np.load('./data/{}_{}.npz'.format(file_name, i))
         res_data['timestep'].append(loaded_data['timestep'])
-        res_data['rho'].append(loaded_data['rho'])
+        res_data['f_poststreaming'].append(loaded_data['f_poststreaming'])
         res_data['u'].append(loaded_data['u'])
     print("concatenating ... ")
     res_data['timestep'] = np.concatenate(res_data['timestep'], axis=0)
-    res_data['rho'] = np.concatenate(res_data['rho'], axis=0)
+    res_data['f_poststreaming'] = np.concatenate(res_data['f_poststreaming'], axis=0)
     res_data['u'] = np.concatenate(res_data['u'], axis=0)
     return res_data
 
-def read_data_and_downsample(total_batch, factor=4):
-    def batch_read_file(file_name):
-        loaded_data = np.load(file_name)
+def read_data_and_downsample(total_batch, factor=4, file_name='batched_ref_data'):
+    def batch_read_file(loaded_data):
         resized_shape = (
         loaded_data['u'].shape[0], round(loaded_data['u'].shape[1] / factor), round(loaded_data['u'].shape[2] / factor))
         return loaded_data['timestep'], resample_field(loaded_data['u'], factor, shape=(
@@ -101,7 +90,8 @@ def read_data_and_downsample(total_batch, factor=4):
         tasks = []
         with ThreadPoolExecutor(max_workers=24) as executor:
             for i in range(total_batch):
-                tasks.append(executor.submit(batch_read_file, './data/batched_ref_data_{}.npz'.format(i)))
+                loaded_data = np.load("./data/{}_{}.npz".format(file_name, i))
+                tasks.append(executor.submit(batch_read_file, loaded_data))
             for task in tqdm(tasks):
                 yield task.result()
     res_data = {
@@ -119,12 +109,12 @@ def read_data_and_downsample(total_batch, factor=4):
     res_data['f_poststreaming'] = np.concatenate(res_data['f_poststreaming'], axis=0)
     return res_data
 
-def generate_sim_dataset_and_save(diam, ts_start, ts_end, output_offset=0, output_stride=1, init_f=None, file_name="batched_ref_data"):
+def generate_sim_dataset_and_save(diam, ts_start, ts_end, output_offset=0, output_stride=1, init_f=None, output_file_name="batched_ref_data"):
     def process_batched_data(batched_data, seq_num, pbar):
         batched_data['timestep'] = np.array(batched_data['timestep'])
         batched_data['u'] = np.stack(batched_data['u'], axis=0)
         batched_data['rho'] = np.stack(batched_data['rho'], axis=0)
-        np.savez_compressed("./data/{}_{}.npz".format(file_name, seq_num), timestep=batched_data['timestep'], u=batched_data['u'], f_poststreaming=batched_data['f_poststreaming'])
+        np.savez_compressed("./data/{}_{}.npz".format(output_file_name, seq_num), timestep=batched_data['timestep'], u=batched_data['u'], f_poststreaming=batched_data['f_poststreaming'])
         pbar.set_description("Seq {} saved".format(seq_num))
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=24) as executor:
@@ -142,3 +132,17 @@ def generate_sim_dataset_and_save(diam, ts_start, ts_end, output_offset=0, outpu
         print("Finishing batch tasks ... ")
         for task in tqdm(tasks):
             task.result()
+
+def generate_train_test_dataset():
+    generate_sim_dataset_and_save(40, 0, 240000, output_offset=200000, output_stride=8000, init_f=None,
+                                  output_file_name='init_frames')
+    init_data_frames = read_data(1, file_name='init_frames')
+    train_init_f = init_data_frames['f_poststreaming'][0]
+    test_init_f = init_data_frames['f_poststreaming'][1]
+    generate_sim_dataset_and_save(40, 0, 4000, output_offset=0, output_stride=8, init_f=train_init_f, output_file_name='train_ref_data')
+    generate_sim_dataset_and_save(40, 0, 4000, output_offset=0, output_stride=8, init_f=test_init_f, output_file_name='test_ref_data')
+
+def read_train_test_dataset():
+    train_ref_data = read_data_and_downsample(51, 8, file_name='train_ref_data')
+    test_ref_data = read_data_and_downsample(51, 8, file_name='test_ref_data')
+    return train_ref_data, test_ref_data
