@@ -775,6 +775,10 @@ class LBMBase(object):
         """
         return jnp.dot(fneq, self.lattice.cc)
 
+    @partial(vmap, in_axes=(None, 0), out_axes=0)
+    def vmapped_update_macroscopic(self, f):
+        return self.update_macroscopic(f)
+
     @partial(jit, static_argnums=(0,), inline=True)
     def update_macroscopic(self, f):
         """
@@ -882,6 +886,11 @@ class LBMBase(object):
             return f_poststreaming, f_postcollision
         else:
             return f_poststreaming, None
+
+    @partial(vmap, in_axes=(None, None, 0), out_axes=0)
+    def vmapped_run_step(self, timestep, init_f=None):
+        return self.run_step(timestep, init_f)
+
 
     def run_step(self, timestep, init_f=None):
         self.init_saved_data()
