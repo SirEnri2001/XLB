@@ -30,15 +30,18 @@ def instantiate_simulator(diam, with_cnn_correction=False, transfer_output=True,
     else:
         return model_settings.Cylinder(**kwargs)
 
-def generate_sim_dataset(diam, ts_start, ts_end, output_offset=0, output_stride=1, init_f=None):
-    nx = int(22 * diam)
-    ny = int(4.1 * diam)
-    prescribed_vel = 0.006
-    tc = prescribed_vel / diam
-    if ts_end < int(100 // tc):
-        print(colored("WARNING: timestep_end is too small, Karman flow may not appear. Recommend value is {}".format(
-            int(100 // tc)), "red"))
-    sim = instantiate_simulator(diam)
+def generate_sim_dataset(diam, ts_start, ts_end, output_offset=0, output_stride=1, init_f=None, solver=None):
+    if solver is not None:
+        sim = solver
+    else:
+        nx = int(22 * diam)
+        ny = int(4.1 * diam)
+        prescribed_vel = 0.006
+        tc = prescribed_vel / diam
+        if ts_end < int(100 // tc):
+            print(colored("WARNING: timestep_end is too small, Karman flow may not appear. Recommend value is {}".format(
+                int(100 // tc)), "red"))
+        sim = instantiate_simulator(diam)
     generated_data = sim.run(ts_end, ts_start, output_offset, output_stride, init_f=init_f)
     print("sim completed, data postprocessing ...")
     generated_data['timestep'] = np.array(generated_data['timestep'])
