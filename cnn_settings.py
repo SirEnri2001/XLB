@@ -11,7 +11,7 @@ class ConvBlock(nn.Module):
     @nn.compact
     def __call__(self, inputs):
         x = nn.Conv(self.features, kernel_size=self.kernel_size, strides=self.strides, padding='SAME')(inputs)
-        x = nn.BatchNorm(use_running_average=True)(x)
+        # x = nn.BatchNorm(use_running_average=True)(x)
         x = nn.relu(x)
         return x
 
@@ -34,10 +34,11 @@ class UpBlock(nn.Module):
     up_factor: int = 2
 
     @nn.compact
-    def __call__(self, x):
+    def __call__(self, x, left_part):
+        x = nn.ConvTranspose(self.features, kernel_size=(2, 2), strides=self.up_factor, padding='SAME')(x)
+        x = jax.lax.concatenate([left_part, x], dimension=3)
         x = ConvBlock(self.features)(x)
         x = ConvBlock(self.features)(x)
-        x = nn.ConvTranspose(self.features, kernel_size=(2, 2), strides=self.up_factor, padding='VALID')(x)
         return x
 
 
@@ -47,27 +48,12 @@ class UNet(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        input_shape = x.shape
         # Contracting path
-        down1 = DownBlock(self.features_start * 2)(x)
+        down1 = DownBlock(self.features_start)(x)
         down1_max_pooled = nn.max_pool(down1, window_shape=(2, 2), strides=(2, 2))
-        down2 = DownBlock(self.features_start * 4)(down1_max_pooled)
-        down2_max_pooled = nn.max_pool(down2, window_shape=(2, 2), strides=(2, 2))
-        down3 = DownBlock(self.features_start * 8)(down2_max_pooled)
-        down3_max_pooled = nn.max_pool(down3, window_shape=(2, 2), strides=(2, 2))
-        down4 = DownBlock(self.features_start * 16)(down3_max_pooled)
-        down4_max_pooled = nn.max_pool(down4, window_shape=(2, 2), strides=(2, 2))
-
-        # Expanding path with concatenation
-        up1 = UpBlock(self.features_start * 16)(down4_max_pooled)
-        down4_sliced = jax.lax.slice(down4, (4, 4, 0), (down4.shape[0] - 4, down4.shape[1] - 4, down4.shape[2]))
-        up1_concatenated = jax.lax.concatenate([down4_sliced, up1], dimension=2)
-        up2 = UpBlock(self.features_start * 4)(up1_concatenated)
-        down3_sliced = jax.lax.slice(down3, (4, 4, 0), (down3.shape[0] - 4, down3.shape[1] - 4, down3.shape[2]))
-        up2_concatenated = jax.lax.concatenate([down3_sliced, up2], dimension=2)
-        up3 = UpBlock(self.features_start * 2)(up2_concatenated)
-        print(up3.shape)
-        return up3
+        up1 = UpBlock(self.features_start)(down1_max_pooled, down1)
+        output = nn.Dense(2)(up1)
+        return output
 
 
 class SimpleNet(nn.Module):
@@ -111,21 +97,26 @@ def normalize_frame(frame):
     max = frame.max()
     return (frame - min) / (max - min)
 
-@partial(jax.jit, static_argnums=(2, 3))
-def train_step(state, batch_data, low_res_lbm_solver, frame_idx = 0):
-  """Train for a single step."""
-  def loss_fn(params, f):
-      _, high_res_u = low_res_lbm_solver.update_macroscopic(f)
-      high_res_u = normalize_frame(high_res_u)
-      input_f = normalize_frame(f)
-      low_res_step_output = low_res_lbm_solver.run_step(0, input_f)
-      correction = state.apply_fn({'params': params}, low_res_lbm_solver.saved_data['u'][0])
-      loss = optax.l2_loss(normalize_frame(low_res_step_output['u'][0]) + correction, high_res_u).sum()
-      return loss
-  grad_fn = jax.grad(loss_fn)
-  grads = grad_fn(state.params, batch_data['f_poststreaming'][frame_idx + 1])
-  state = state.apply_gradients(grads=grads)
-  return state
+@partial(jax.vmap, in_axes=(0), out_axes=0)
+def vmapped_normalize_frame(frame):
+    return normalize_frame(frame)
+
+@partial(jax.jit, static_argnums=(2))
+def train_step(state, batch_data, low_res_lbm_solver):
+    """Train for a single step."""
+    def loss_fn(params):
+        batched_f = batch_data['f_poststreaming']
+        _, high_res_u = low_res_lbm_solver.vmapped_update_macroscopic(batched_f)
+        high_res_u = vmapped_normalize_frame(high_res_u)
+        low_res_step_output = low_res_lbm_solver.vmapped_run_step(0, batched_f)
+        correction = state.apply_fn({'params': params}, low_res_step_output['u'][0])
+        loss = optax.l2_loss(normalize_frame(low_res_step_output['u'][0]) + 0.01 * correction, high_res_u).sum()
+        return loss
+    grad_fn = jax.grad(loss_fn)
+    grads = grad_fn(state.params)
+    train_loss = loss_fn(state.params)
+    state = state.apply_gradients(grads=grads)
+    return state, train_loss
 
 @jax.jit
 def pred_step(state, batch):
