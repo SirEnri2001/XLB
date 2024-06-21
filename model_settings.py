@@ -72,6 +72,7 @@ class BGKSimForce(LBMExternalForce):
 
 class CylinderForce(BGKSimForce):
     def __init__(self, **kwargs):
+        self.state = None
         self.diam=kwargs['diam']
         self.prescribed_vel=0.006
         super().__init__(**kwargs)
@@ -115,3 +116,6 @@ class CylinderForce(BGKSimForce):
 
     def set_state(self, state):
         self.state = state
+
+    def set_params(self, params):
+        self.params = params
