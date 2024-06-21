@@ -142,7 +142,7 @@ def generate_train_test_dataset():
     generate_sim_dataset_and_save(40, 0, 4000, output_offset=0, output_stride=8, init_f=train_init_f, output_file_name='train_ref_data')
     generate_sim_dataset_and_save(40, 0, 4000, output_offset=0, output_stride=8, init_f=test_init_f, output_file_name='test_ref_data')
 
-def read_train_test_dataset():
-    train_ref_data = read_data_and_downsample(51, 8, file_name='train_ref_data')
-    test_ref_data = read_data_and_downsample(51, 8, file_name='test_ref_data')
+def read_train_test_dataset(batch_num=51):
+    train_ref_data = read_data_and_downsample(batch_num, 8, file_name='train_ref_data')
+    test_ref_data = read_data_and_downsample(batch_num, 8, file_name='test_ref_data')
     return train_ref_data, test_ref_data
