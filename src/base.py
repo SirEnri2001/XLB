@@ -1156,10 +1156,11 @@ class LBMExternalForce(LBMBase):
             The post-collision distribution functions after the simulation step, or None if
             return_fpost is False.
         """
+        print("LBMExternalForce step")
         f, feq, rho, u = self.prepare_step(f_poststreaming)
-        f_force_applied = self.apply_force(f, feq, rho, u)
-        f_postcollision = self.collision(f_force_applied, feq, rho, u)
-        f_postcollision = self.apply_bc(f_postcollision, f_poststreaming, timestep, "PostCollision")
+        f_postcollision = self.collision(f, feq, rho, u)
+        f_force_applied = self.apply_force(f_postcollision, feq, rho, u)
+        f_postcollision = self.apply_bc(f_force_applied, f_poststreaming, timestep, "PostCollision")
         f_poststreaming = self.streaming(f_postcollision)
         f_poststreaming = self.apply_bc(f_poststreaming, f_postcollision, timestep, "PostStreaming")
 
@@ -1167,3 +1168,4 @@ class LBMExternalForce(LBMBase):
             return f_poststreaming, f_postcollision
         else:
             return f_poststreaming, None
+
