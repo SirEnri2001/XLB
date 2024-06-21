@@ -25,6 +25,7 @@ class DownBlock(nn.Module):
     def __call__(self, x):
         x = ConvBlock(self.features)(x)
         x = ConvBlock(self.features)(x)
+        x = nn.max_pool(x, window_shape=(2, 2), strides=(2, 2))
         return x
 
 
@@ -35,8 +36,8 @@ class UpBlock(nn.Module):
 
     @nn.compact
     def __call__(self, x, left_part):
-        x = nn.ConvTranspose(self.features, kernel_size=(2, 2), strides=self.up_factor, padding='SAME')(x)
-        x = jax.lax.concatenate([left_part, x], dimension=3)
+        x = nn.ConvTranspose(self.features, kernel_size=(2, 2), strides=self.up_factor, padding='VALID')(x)
+        x = jax.lax.concatenate([left_part, x], dimension=2)
         x = ConvBlock(self.features)(x)
         x = ConvBlock(self.features)(x)
         return x
@@ -44,16 +45,21 @@ class UpBlock(nn.Module):
 
 class UNet(nn.Module):
     """UNet architecture with contracting and expanding paths."""
-    features_start: int = 64
+    features_start: int = 16
 
     @nn.compact
     def __call__(self, x):
         # Contracting path
+        x = jnp.pad(x, ((9,9), (6,6), (0,0)))
         down1 = DownBlock(self.features_start)(x)
-        down1_max_pooled = nn.max_pool(down1, window_shape=(2, 2), strides=(2, 2))
-        up1 = UpBlock(self.features_start)(down1_max_pooled, down1)
-        output = nn.Dense(2)(up1)
-        return output
+        down2 = DownBlock(self.features_start*2)(down1)
+        down4 = DownBlock(self.features_start*4)(down2)
+        up8_1 = ConvBlock(self.features_start*8)(down4)
+        up8 = ConvBlock(self.features_start*8)(up8_1)
+        up4 = UpBlock(self.features_start*2)(up8, down2)
+        up2 = UpBlock(self.features_start)(up4, down1)
+        up1 = UpBlock(2)(up2, x)
+        return up1[9:-9, 6:-6, ...]
 
 
 class SimpleNet(nn.Module):
@@ -85,7 +91,7 @@ class TrainState(train_state.TrainState):
 
 def create_train_state(module, rng, learning_rate, momentum):
   """Creates an initial `TrainState`."""
-  params = module.init(rng, jnp.ones([1, 110, 20, 2]))['params'] # initialize parameters by passing a template image
+  params = module.init(rng, jnp.ones([110, 20, 2]))['params'] # initialize parameters by passing a template image
   tx = optax.sgd(learning_rate, momentum)
   return TrainState.create(
       apply_fn=module.apply, params=params, tx=tx,
@@ -101,16 +107,14 @@ def normalize_frame(frame):
 def vmapped_normalize_frame(frame):
     return normalize_frame(frame)
 
-@partial(jax.jit, static_argnums=(2))
-def train_step(state, batch_data, low_res_lbm_solver):
+@partial(jax.jit, static_argnums=(3))
+def train_step(state, batch_data_f, high_res_ref_data_u, low_res_lbm_solver):
     """Train for a single step."""
     def loss_fn(params):
-        batched_f = batch_data['f_poststreaming']
-        _, high_res_u = low_res_lbm_solver.vmapped_update_macroscopic(batched_f)
-        high_res_u = vmapped_normalize_frame(high_res_u)
+        batched_f = batch_data_f
+        high_res_u = high_res_ref_data_u
         low_res_step_output = low_res_lbm_solver.vmapped_run_step(0, batched_f)
-        correction = state.apply_fn({'params': params}, low_res_step_output['u'][0])
-        loss = optax.l2_loss(normalize_frame(low_res_step_output['u'][0]) + 0.01 * correction, high_res_u).sum()
+        loss = optax.l2_loss(low_res_step_output['u'][0], high_res_u).sum()*100
         return loss
     grad_fn = jax.grad(loss_fn)
     grads = grad_fn(state.params)
